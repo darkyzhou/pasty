@@ -3,6 +3,7 @@ WORKDIR /usr/src/pasty
 COPY . .
 RUN cargo install --path .
 
-FROM alpine:latest
+FROM debian:10-slim
 COPY --from=builder /usr/local/cargo/bin/pasty /usr/local/bin/pasty
-ENTRYPOINT ["/usr/local/bin/pasty"]
+WORKDIR /
+CMD ["pasty"]
