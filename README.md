@@ -40,6 +40,12 @@ curl -X DELETE https://pasty.dev/rick?pwd=12345
 
 ## 部署
 
+使用 docker 进行部署是最简单的方式，下面使用环境变量指定服务端监听地址 `0.0.0.0`，因为默认只会监听 `127.0.0.1`。
+
+```
+ROCKET_ADDRESS="0.0.0.0" docker run -d --restart=unless-stopped -p 8000:8000 -e ROCKET_ADDRESS darkyzhou/pasty
+```
+
 ## TODO
 
 - [ ] 测试
