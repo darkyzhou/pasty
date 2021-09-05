@@ -129,7 +129,7 @@ fn delete_by_id(db: &State<DB>, id: &str, password: &str) -> (Status, &'static s
 
 #[catch(404)]
 fn not_found() -> &'static str {
-    "此链接不存在"
+    "访问的链接无效"
 }
 
 #[catch(500)]
