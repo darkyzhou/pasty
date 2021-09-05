@@ -1,6 +1,11 @@
 # pasty
 
-使用 Rocket 和 RocksDB 实现的最简单的 pastebin 服务。其中 RocksDB 提供数据持久化功能，能够承受程序的突然崩溃、机器的突然断电等灾害，同时保证已有的数据不会冲突。
+使用 Rocket 和 RocksDB 实现的最简单的 Pastebin/短链接 服务。其中 RocksDB 提供数据持久化功能，在理论上能够提供高速的键值访问，以及承受程序的突然崩溃和机器的突然断电等灾害，同时保证已有的数据不会冲突。
+
+## 环境变量
+
+- `DB_FILE_PATH`：数据库文件夹的目录。
+- `INDEX_LINK`：访问首页时（例如 `https://pasty.dev`）会跳转到的链接。如果不指定，默认会显示一行文本：`欢迎使用 Pasty！具体的用法请参考：https://github.com/darkyzhou/pasty`。
 
 ## 用法
 

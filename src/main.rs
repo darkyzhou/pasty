@@ -12,13 +12,23 @@ mod key;
 use key::*;
 
 #[derive(Debug, Responder)]
-enum GetResponse {
+enum Response {
     PlainText(String),
     Redirect(Redirect),
 }
 
+#[get("/")]
+fn get_index() -> Response {
+    match env::var("INDEX_LINK") {
+        Ok(link) => Response::Redirect(Redirect::to(link)),
+        _ => Response::PlainText(
+            "欢迎使用 Pasty！具体的用法请参考：https://github.com/darkyzhou/pasty".to_string(),
+        ),
+    }
+}
+
 #[get("/<id>")]
-fn get_by_id(db: &State<DB>, id: &str) -> (Status, GetResponse) {
+fn get_by_id(db: &State<DB>, id: &str) -> (Status, Response) {
     match db.get(type_key(id)).unwrap() {
         Some(type_val) => {
             let type_str = String::from_utf8(type_val).unwrap();
@@ -30,11 +40,8 @@ fn get_by_id(db: &State<DB>, id: &str) -> (Status, GetResponse) {
                     db.put(stat_count_key(id), (stat_count + 1).to_be_bytes())
                         .unwrap();
                     match &type_str[..] {
-                        "link" => (
-                            Status::Found,
-                            GetResponse::Redirect(Redirect::to(content_str)),
-                        ),
-                        "plain" => (Status::Ok, GetResponse::PlainText(content_str)),
+                        "link" => (Status::Found, Response::Redirect(Redirect::to(content_str))),
+                        "plain" => (Status::Ok, Response::PlainText(content_str)),
                         _ => panic!("unknown type '{}' for id '{}'", type_str, id),
                     }
                 }
@@ -43,7 +50,7 @@ fn get_by_id(db: &State<DB>, id: &str) -> (Status, GetResponse) {
         }
         None => (
             Status::NotFound,
-            GetResponse::PlainText("此短链接不存在".to_string()),
+            Response::PlainText("此短链接不存在".to_string()),
         ),
     }
 }
@@ -147,7 +154,13 @@ async fn main() {
         .register("/", catchers![not_found, internal_error])
         .mount(
             "/",
-            routes![get_by_id, get_stat_by_id, post_by_id, delete_by_id],
+            routes![
+                get_index,
+                get_by_id,
+                get_stat_by_id,
+                post_by_id,
+                delete_by_id
+            ],
         )
         .launch()
         .await;
