@@ -1,15 +1,19 @@
 #[macro_use]
 extern crate rocket;
 
+use nanoid::nanoid;
 use rocket::http::Status;
 use rocket::response::Redirect;
 use rocket::State;
 use rocksdb::{WriteBatch, DB};
 use std::convert::TryInto;
-use std::env;
+use url::Url;
 
 mod key;
 use key::*;
+
+mod config;
+use config::*;
 
 #[derive(Debug, Responder)]
 enum Response {
@@ -18,13 +22,26 @@ enum Response {
 }
 
 #[get("/")]
-fn get_index() -> Response {
-    match env::var("INDEX_LINK") {
-        Ok(link) => Response::Redirect(Redirect::to(link)),
-        _ => Response::PlainText(
-            "欢迎使用 Pasty！具体的用法请参考：https://github.com/darkyzhou/pasty".to_string(),
-        ),
+fn get_index(config: &State<Config>) -> Response {
+    if !config.index_link.is_empty() {
+        Response::Redirect(Redirect::to(config.index_link.clone()))
+    } else {
+        Response::PlainText(config.index_text.clone())
     }
+}
+
+#[post("/?<type>&<pwd>&<access>", data = "<content>")]
+fn post_index(
+    db: &State<DB>,
+    config: &State<Config>,
+    r#type: Option<&str>,
+    pwd: &str,
+    access: &str,
+    content: &str,
+) -> (Status, String) {
+    let length: usize = config.random_id_length.try_into().unwrap();
+    let id = nanoid!(length);
+    post_by_id(db, config, &id[..], r#type, pwd, access, content)
 }
 
 #[get("/<id>")]
@@ -66,20 +83,35 @@ fn get_stat_by_id(db: &State<DB>, id: &str) -> (Status, String) {
     }
 }
 
-#[post("/<id>?<type>&<pwd>", data = "<content>")]
+#[post("/<id>?<type>&<pwd>&<access>", data = "<content>")]
 fn post_by_id(
     db: &State<DB>,
+    config: &State<Config>,
     id: &str,
-    r#type: &str,
+    r#type: Option<&str>,
     pwd: &str,
+    access: &str,
     content: &str,
-) -> (Status, &'static str) {
-    if id.is_empty() || r#type.is_empty() || pwd.is_empty() {
-        return (Status::BadRequest, "三个参数不能为空");
+) -> (Status, String) {
+    if !config.access_password.is_empty() && access != &config.access_password[..] {
+        return (Status::BadRequest, "访问密码错误".to_string());
     }
 
-    if !vec!["link", "plain"].contains(&r#type) {
-        return (Status::BadRequest, "不支持的短链接类型");
+    let content_type = match r#type {
+        Some(val) => val,
+        None => "link",
+    };
+
+    if id.is_empty() || content_type.is_empty() || pwd.is_empty() {
+        return (Status::BadRequest, "三个参数不能为空".to_string());
+    }
+
+    if !vec!["link", "plain"].contains(&content_type) {
+        return (Status::BadRequest, "不支持的短链接类型".to_string());
+    }
+
+    if content_type == "link" && Url::parse(content).is_err() {
+        return (Status::BadRequest, "给定的链接不是有效的 URL".to_string());
     }
 
     match db.get(type_key(id)).unwrap() {
@@ -89,13 +121,13 @@ fn post_by_id(
                 if password_str == pwd.to_string() {
                     let mut batch = WriteBatch::default();
                     batch.put(content_key(id), content.as_bytes());
-                    batch.put(type_key(id), r#type.as_bytes());
+                    batch.put(type_key(id), content_type.as_bytes());
                     db.write(batch).unwrap();
-                    (Status::Ok, "更新短链接成功")
+                    (Status::Ok, format!("更新短链接成功：{}", id))
                 } else {
                     (
                         Status::BadRequest,
-                        "此短链接已经存在，需要指定正确的密码来更新它",
+                        "此短链接已经存在，需要指定正确的密码来更新它".to_string(),
                     )
                 }
             }
@@ -104,11 +136,11 @@ fn post_by_id(
         None => {
             let mut batch = WriteBatch::default();
             batch.put(content_key(id), content.as_bytes());
-            batch.put(type_key(id), r#type.as_bytes());
+            batch.put(type_key(id), content_type.as_bytes());
             batch.put(password_key(id), pwd.as_bytes());
             batch.put(stat_count_key(id), 0u64.to_be_bytes());
             db.write(batch).unwrap();
-            (Status::Created, "短链接创建成功")
+            (Status::Created, format!("短链接创建成功：{}", id))
         }
     }
 }
@@ -136,7 +168,7 @@ fn delete_by_id(db: &State<DB>, id: &str, password: &str) -> (Status, &'static s
 
 #[catch(404)]
 fn not_found() -> &'static str {
-    "访问的链接无效"
+    "此链接不存在。如果你正在更新链接，可能是漏了参数！"
 }
 
 #[catch(500)]
@@ -146,16 +178,21 @@ fn internal_error() -> &'static str {
 
 #[rocket::main]
 async fn main() {
-    let db_path = env::var("DB_FILE_PATH").unwrap_or("data".to_string());
-    let db = DB::open_default(db_path.clone()).unwrap();
-
-    let rocket_result = rocket::build()
+    let rocket_instance = rocket::build();
+    let figment = rocket_instance.figment();
+    let config: Config = figment
+        .extract_inner("pasty")
+        .expect("error loading configuration");
+    let db = DB::open_default(config.db_path.clone()).expect("error opening database");
+    let result = rocket_instance
         .manage(db)
+        .manage(config)
         .register("/", catchers![not_found, internal_error])
         .mount(
             "/",
             routes![
                 get_index,
+                post_index,
                 get_by_id,
                 get_stat_by_id,
                 post_by_id,
@@ -165,5 +202,5 @@ async fn main() {
         .launch()
         .await;
 
-    rocket_result.expect("error shutting down http server");
+    result.expect("error shutting down http server");
 }
